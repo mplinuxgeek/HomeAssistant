@@ -6,6 +6,8 @@ https://home-assistant.io/components/demo/
 """
 import logging
 import socket
+import os
+import sys
 
 import voluptuous as vol
 
@@ -93,13 +95,9 @@ class LazyBoneLight(Light):
     def turn_off(self, **kwargs) -> None:
         """Turn the light off."""
         self._state = False
-
         self.set_state()
 
     def update(self):
-        _LOGGER.info("GetState Lazybone: {} {}".format(self._state, self._brightness))
-
-    def update_xx(self):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(5)
@@ -119,14 +117,12 @@ class LazyBoneLight(Light):
                 else:
                     self._state = True;
                 self._brightness = 256 - value[1]
-            _LOGGER.info("GetState Lazybone: {:d}", self._brightness)
+            _LOGGER.info("GetState: {} {} {}".format(self._name, self._state, self._brightness))
         except:
-            e = sys.exc_info()[0]
-            _LOGGER.warning("Failed to get state: {}", e)
+            _LOGGER.warning("GetState: {} failed".format(self._name))
             self.set_state()        
 
     def set_state(self):
-        _LOGGER.info("SetState Lazybone")
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(5)
@@ -146,6 +142,5 @@ class LazyBoneLight(Light):
                 len = sock.send(query)
                 sock.close()
         except:
-            e = sys.exc_info()[0]
-            _LOGGER.warning("Failed to set state: {}", e)
+            _LOGGER.warning("Setstate: {} failed", self._name)
             self.set_state()        

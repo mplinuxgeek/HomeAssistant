@@ -2,6 +2,8 @@
 Daikin SkyFi platform that offers a climate device for Diakin A/C.
 """
 import logging
+import os
+import sys
 import select
 import http.client
 
@@ -47,7 +49,7 @@ class SkyFiClimate(ClimateDevice):
         self._target_temperature = 21.0
         self._current_fan_mode = self._fan_list[1]
         self._current_operation = self._operation_list[0]
-        self.update()
+        
 
     @property
     def should_poll(self):
@@ -63,11 +65,9 @@ class SkyFiClimate(ClimateDevice):
             conn.close()
             self.set_props(data)
         except:
-            e = sys.exc_info()[0]
-            _LOGGER.warning("Failed to get state: {}", e)
+            _LOGGER.warning("GetState: {} failed".format(self._name))
 
     def set_props(self, data):
-        _LOGGER.info(data)
         md = {}
         lst = data.split("&")
         for x in lst:
@@ -163,8 +163,6 @@ class SkyFiClimate(ClimateDevice):
             self.set_props(data)
             #self.schedule_update_ha_state()
         except:
-            e = sys.exc_info()[0]
-            _LOGGER.warning("Failed to set state: {}", e)
-            self.set_state()
+            _LOGGER.warning("SetState: {} failed".format(self._name))
 
 
