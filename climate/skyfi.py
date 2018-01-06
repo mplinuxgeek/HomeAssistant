@@ -6,23 +6,25 @@ import os
 import sys
 import select
 import http.client
+import sys, traceback
 
 import voluptuous as vol
 
 from homeassistant.components.climate import PLATFORM_SCHEMA
 from homeassistant.components.climate import (
-    ClimateDevice, ATTR_TARGET_TEMP_HIGH, ATTR_TARGET_TEMP_LOW)
+    ClimateDevice, ATTR_TARGET_TEMP_HIGH, ATTR_TARGET_TEMP_LOW, SUPPORT_FAN_MODE, SUPPORT_OPERATION_MODE, SUPPORT_TARGET_TEMPERATURE)
 from homeassistant.const import TEMP_CELSIUS, TEMP_FAHRENHEIT, ATTR_TEMPERATURE, CONF_HOST, CONF_PASSWORD
 from homeassistant.exceptions import TemplateError
 from homeassistant.helpers.entity import Entity
 import homeassistant.helpers.config_validation as cv
+
+SUPPORT_FLAGS = (SUPPORT_TARGET_TEMPERATURE | SUPPORT_FAN_MODE | SUPPORT_OPERATION_MODE)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 	vol.Required(CONF_HOST): cv.string,
     vol.Required(CONF_PASSWORD): cv.string,})
 
 _LOGGER = logging.getLogger(__name__)
-
 
 def setup_platform(hass, config, add_devices, discovery_info=None):
     """Set up the Demo climate devices."""
@@ -31,8 +33,6 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     add_devices([
         SkyFiClimate('Daikin', TEMP_CELSIUS, host, password)
     ])
-
-
 
 class SkyFiClimate(ClimateDevice):
     """Representation of a demo climate device."""
@@ -43,13 +43,18 @@ class SkyFiClimate(ClimateDevice):
         self._unit_of_measurement = unit_of_measurement
         self._host = host
         self._password = password
-        self._fan_list = ['', 'Low', 'Medium', 'High' ]
-        self._operation_list = ['Off', 'Auto', 'Heat', 'Cool']
+        self._fan_list = ['Low', 'Medium', 'High' ]
+        self._operation_list = ['Off', 'Auto', 'Heat', 'Cool', 'Fan']
+        self._operation_list_full = ['Off', 'Auto', 'Heat', 'Heat/Auto', 'Dry', '5', '6', '7', 'Cool', 'Cool/Auto', '10', '11', '12', '13', '14', '15', 'Fan']
         self._current_temperature = 21.0
         self._target_temperature = 21.0
         self._current_fan_mode = self._fan_list[1]
-        self._current_operation = self._operation_list[0]
-        
+        self._current_operation = self._operation_list_full[0]
+
+    @property
+    def supported_features(self):
+        """Return the list of supported features."""
+        return SUPPORT_FLAGS
 
     @property
     def should_poll(self):
@@ -64,23 +69,32 @@ class SkyFiClimate(ClimateDevice):
             data = resp.read().decode()
             conn.close()
             self.set_props(data)
-        except:
-            _LOGGER.warning("GetState: {} failed".format(self._name))
+        except Exception as e:
+            _LOGGER.warning("update: {}".format(e))
 
     def set_props(self, data):
-        md = {}
-        lst = data.split("&")
-        for x in lst:
-            v = x.split("=")
-            md[v[0]] = v[1]
+        try:
+          md = {}
+          lst = data.split("&")
+          for x in lst:
+              v = x.split("=")
+              md[v[0]] = v[1]
 
-        self._current_temperature = float(md['roomtemp'])
-        self._target_temperature = float(md['settemp'])
-        if int(md['opmode']) == 0:
-            self._current_operation = self._operation_list[0]
-        else:
-            self._current_operation = self._operation_list[int(md['acmode'])]
-        self._current_fan_mode = self._fan_list[int(md["fanspeed"])]
+          _LOGGER.debug("roomtemp: {}".format(md["roomtemp"]))
+          self._current_temperature = float(md['roomtemp'])
+          _LOGGER.debug("settemp: {}".format(md["settemp"]))
+          self._target_temperature = float(md['settemp'])
+
+          _LOGGER.debug("acmode: {}".format(md["acmode"]))
+          if int(md['opmode']) == 0:
+              self._current_operation = self._operation_list_full[0]
+          else:
+              self._current_operation = self._operation_list_full[int(md['acmode'])]
+
+          _LOGGER.debug("fanspeed: {}".format(md["fanspeed"]))
+          self._current_fan_mode = self._fan_list[int(md["fanspeed"]) - 1]
+        except Exception as e:
+            _LOGGER.warning("set_props: {}".format(e))
 
     @property
     def name(self):
@@ -96,11 +110,10 @@ class SkyFiClimate(ClimateDevice):
     def current_temperature(self):
         """Return the current temperature."""
         return self._current_temperature
-
     @property
     def target_temperature(self):
         """Return the temperature we try to reach."""
-        if self._current_operation == self._operation_list[0]:
+        if self._current_operation == self._operation_list_full[0]:
             return 0
         return self._target_temperature
 
@@ -149,20 +162,32 @@ class SkyFiClimate(ClimateDevice):
         """Set the new state of the ac"""
         try:
             conn = http.client.HTTPConnection(self._host, 2000)
-            mode = self._operation_list.index(self._current_operation)
+            if self._current_operation == "False":
+                mode = 0
+            else:
+                mode = self._operation_list.index(self._current_operation)
+            _LOGGER.debug("mode = {}".format(mode))
+            opmode = 0
+            pstate = 1
             if mode == 0:
                 pstate = 0;
-            else:
-                pstate = 1;
-            fan = self._fan_list.index(self.current_fan_mode)
-            payload = "/set.cgi?pass={}&p={}&t={:.5f}&f={}".format(self._password, pstate, self._target_temperature, fan)
+            elif mode == 1:
+                opmode = 1;
+            elif mode == 2:
+                opmode = 2;
+            elif mode == 3:
+                opmode = 8;
+            elif mode == 4:
+                opmode = 16;
+            fan = self._fan_list.index(self.current_fan_mode) + 1
+            payload = "/set.cgi?pass={}&p={}&t={:.0f}&f={}&m={}".format(self._password, pstate, self._target_temperature, fan, opmode)
+            _LOGGER.info("payload = {}".format(payload))
             conn.request("GET", payload)
             resp = conn.getresponse()
             data = resp.read().decode()
             conn.close()
             self.set_props(data)
             #self.schedule_update_ha_state()
-        except:
-            _LOGGER.warning("SetState: {} failed".format(self._name))
-
-
+#        except:
+        except Exception as e:
+            _LOGGER.warning("set_state: {}".format(e))
