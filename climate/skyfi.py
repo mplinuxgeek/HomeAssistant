@@ -18,10 +18,24 @@ from homeassistant.helpers.entity import Entity
 import homeassistant.helpers.config_validation as cv
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-	vol.Required(CONF_HOST): cv.string,
+    vol.Required(CONF_HOST): cv.string,
     vol.Required(CONF_PASSWORD): cv.string,})
 
 _LOGGER = logging.getLogger(__name__)
+
+SUPPORT_TARGET_TEMPERATURE = 1
+SUPPORT_TARGET_TEMPERATURE_HIGH = 2
+SUPPORT_TARGET_TEMPERATURE_LOW = 4
+SUPPORT_TARGET_HUMIDITY = 8
+SUPPORT_TARGET_HUMIDITY_HIGH = 16
+SUPPORT_TARGET_HUMIDITY_LOW = 32
+SUPPORT_FAN_MODE = 64
+SUPPORT_OPERATION_MODE = 128
+SUPPORT_HOLD_MODE = 256
+SUPPORT_SWING_MODE = 512
+SUPPORT_AWAY_MODE = 1024
+SUPPORT_AUX_HEAT = 2048
+SUPPORT_FLAGS = SUPPORT_TARGET_TEMPERATURE | SUPPORT_OPERATION_MODE
 
 
 def setup_platform(hass, config, add_devices, discovery_info=None):
@@ -43,13 +57,14 @@ class SkyFiClimate(ClimateDevice):
         self._unit_of_measurement = unit_of_measurement
         self._host = host
         self._password = password
-        self._fan_list = ['', 'Low', 'Medium', 'High' ]
-        self._operation_list = ['Off', 'Auto', 'Heat', 'Cool']
+        self._fan_list = ['', 'Low', 'Medium', 'High']
+        self._operation_list = [ 'Off', 'Auto', 'Heat', 'Cool', 'Dry' ]
+        self._operation_dict = { 0:'Off', 1:'Auto', 2:'Heat', 8:'Cool', 16:'Dry' }
+        self._operation_mode = { 'Off':0, 'Auto':1, 'Heat':2, 'Cool':8, 'Dry':16 }
         self._current_temperature = 21.0
         self._target_temperature = 21.0
         self._current_fan_mode = self._fan_list[1]
         self._current_operation = self._operation_list[0]
-        
 
     @property
     def should_poll(self):
@@ -57,30 +72,30 @@ class SkyFiClimate(ClimateDevice):
         return True
 
     def update(self):
-        try:
+        # try:
             conn = http.client.HTTPConnection(self._host, 2000)
             conn.request("GET", "/ac.cgi?pass={}".format(self._password))
             resp = conn.getresponse()
             data = resp.read().decode()
             conn.close()
             self.set_props(data)
-        except:
-            _LOGGER.warning("GetState: {} failed".format(self._name))
+        # except:
+        #     _LOGGER.error("GetState: %s failed: %s", self._name, data)
 
     def set_props(self, data):
-        md = {}
+        plist = {}
         lst = data.split("&")
         for x in lst:
             v = x.split("=")
-            md[v[0]] = v[1]
+            plist[v[0]] = v[1]
 
-        self._current_temperature = float(md['roomtemp'])
-        self._target_temperature = float(md['settemp'])
-        if int(md['opmode']) == 0:
+        self._current_temperature = float(plist['roomtemp'])
+        self._target_temperature = float(plist['settemp'])
+        if int(plist['opmode']) == 0:
             self._current_operation = self._operation_list[0]
         else:
-            self._current_operation = self._operation_list[int(md['acmode'])]
-        self._current_fan_mode = self._fan_list[int(md["fanspeed"])]
+            self._current_operation = self._operation_dict[int(plist['acmode'])]
+        self._current_fan_mode = self._fan_list[int(plist["fanspeed"])]
 
     @property
     def name(self):
@@ -103,7 +118,6 @@ class SkyFiClimate(ClimateDevice):
         if self._current_operation == self._operation_list[0]:
             return 0
         return self._target_temperature
-
 
     @property
     def current_operation(self):
@@ -129,10 +143,10 @@ class SkyFiClimate(ClimateDevice):
         """Set new target temperatures."""
         if kwargs.get(ATTR_TEMPERATURE) is not None:
             self._target_temperature = kwargs.get(ATTR_TEMPERATURE)
-        if kwargs.get(ATTR_TARGET_TEMP_HIGH) is not None and \
-           kwargs.get(ATTR_TARGET_TEMP_LOW) is not None:
-            self._target_temperature_high = kwargs.get(ATTR_TARGET_TEMP_HIGH)
-            self._target_temperature_low = kwargs.get(ATTR_TARGET_TEMP_LOW)
+        # if kwargs.get(ATTR_TARGET_TEMP_HIGH) is not None and \
+        #    kwargs.get(ATTR_TARGET_TEMP_LOW) is not None:
+        #     self._target_temperature_high = kwargs.get(ATTR_TARGET_TEMP_HIGH)
+        #     self._target_temperature_low = kwargs.get(ATTR_TARGET_TEMP_LOW)
         self.set_state()
 
     def set_fan_mode(self, fan):
@@ -149,11 +163,11 @@ class SkyFiClimate(ClimateDevice):
         """Set the new state of the ac"""
         try:
             conn = http.client.HTTPConnection(self._host, 2000)
-            mode = self._operation_list.index(self._current_operation)
+            mode = self._operation_mode[self._current_operation]
             if mode == 0:
-                pstate = 0;
+                pstate = 0
             else:
-                pstate = 1;
+                pstate = 1
             fan = self._fan_list.index(self.current_fan_mode)
             payload = "/set.cgi?pass={}&p={}&t={:.5f}&f={}".format(self._password, pstate, self._target_temperature, fan)
             conn.request("GET", payload)
@@ -165,4 +179,7 @@ class SkyFiClimate(ClimateDevice):
         except:
             _LOGGER.warning("SetState: {} failed".format(self._name))
 
-
+    @property
+    def supported_features(self):
+        """Return the list of supported features."""
+        return SUPPORT_FLAGS
