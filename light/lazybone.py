@@ -8,6 +8,7 @@ import logging
 import socket
 import os
 import sys
+import time
 
 import voluptuous as vol
 
@@ -15,7 +16,7 @@ from homeassistant.const import CONF_HOST
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS, ATTR_COLOR_TEMP, ATTR_EFFECT,
     ATTR_RGB_COLOR, ATTR_WHITE_VALUE, ATTR_XY_COLOR, SUPPORT_BRIGHTNESS,
-    SUPPORT_COLOR_TEMP, SUPPORT_EFFECT, SUPPORT_RGB_COLOR, SUPPORT_WHITE_VALUE,
+    SUPPORT_COLOR_TEMP, SUPPORT_EFFECT, SUPPORT_COLOR, SUPPORT_WHITE_VALUE,
     Light)
 from homeassistant.exceptions import TemplateError
 from homeassistant.components.climate import PLATFORM_SCHEMA
@@ -98,49 +99,55 @@ class LazyBoneLight(Light):
         self.set_state()
 
     def update(self):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(5)
-                sock.connect((self._host, 2000))
-                #readable, _, _ = select.select([sock], [], [], 2000)
-                value = sock.recv(7)
-                query = bytearray()
-                query.append(0x5B)
-                query.append(0x00)
-                query.append(0x0D)
-                #query = bytes.fromhex('6F000D')
-                len = sock.send(query)
-                value = sock.recv(2)
-                sock.close()
-                if value[0] == 0x00:
-                    self._state = False;
-                else:
-                    self._state = True;
-                self._brightness = 256 - value[1]
-            _LOGGER.info("GetState: {} {} {}".format(self._name, self._state, self._brightness))
-        except:
-            _LOGGER.warning("GetState: {} failed".format(self._name))
-            self.set_state()        
+        retry_count = 5
+        while retry_count > 0:
+            retry_count = retry_count - 1
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(5)
+                    sock.connect((self._host, 2000))
+                    value = sock.recv(7)
+                    query = bytearray()
+                    query.append(0x5B)
+                    query.append(0x00)
+                    query.append(0x0D)
+                    len = sock.send(query)
+                    value = sock.recv(2)
+                    sock.close()
+                    if value[0] == 0x00:
+                        self._state = False;
+                    else:
+                        self._state = True;
+                    self._brightness = 256 - value[1]
+                    retry_count = 0
+            except:
+                if retry_count == 0:
+                    _LOGGER.warning("GetState: {} failed".format(self._name))
+                time.sleep(2)        
 
     def set_state(self):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(5)
-                sock.connect((self._host, 2000))
-                #readable, _, _ = select.select([sock], [], [], 2000)
-                value = sock.recv(7)
-                query = bytearray()
-                query.append(0x67)
-                query.append(256 - self._brightness)
-                query.append(0x0D)
-                #query = bytes.fromhex('6F000D')
-                len = sock.send(query)
-                if self._state:
-                    query[0] = 0x65
-                else:
-                    query[0] = 0x6F
-                len = sock.send(query)
-                sock.close()
-        except:
-            _LOGGER.warning("Setstate: {} failed", self._name)
-            self.set_state()        
+        retry_count = 5
+        while retry_count > 0:
+            retry_count = retry_count - 1
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    sock.settimeout(5)
+                    sock.connect((self._host, 2000))
+                    value = sock.recv(7)
+                    query = bytearray()
+                    query.append(0x67)
+                    query.append(256 - self._brightness)
+                    query.append(0x0D)
+                    len = sock.send(query)
+                    if self._state:
+                        query[0] = 0x65
+                    else:
+                        query[0] = 0x6F
+                    len = sock.send(query)
+                    sock.close()
+            except:
+                if retry_count == 0:
+                    _LOGGER.warning("SetState: {} failed".format(self._name))
+                time.sleep(2)        
+
+

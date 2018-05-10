@@ -6,7 +6,7 @@ import os
 import sys
 import select
 import http.client
-
+import time
 import voluptuous as vol
 
 from homeassistant.components.climate import PLATFORM_SCHEMA
@@ -72,15 +72,8 @@ class SkyFiClimate(ClimateDevice):
         return True
 
     def update(self):
-        # try:
-            conn = http.client.HTTPConnection(self._host, 2000)
-            conn.request("GET", "/ac.cgi?pass={}".format(self._password))
-            resp = conn.getresponse()
-            data = resp.read().decode()
-            conn.close()
-            self.set_props(data)
-        # except:
-        #     _LOGGER.error("GetState: %s failed: %s", self._name, data)
+        payload = "/ac.cgi?pass={}".format(self._password)
+        self.doQuery(payload)
 
     def set_props(self, data):
         plist = {}
@@ -161,23 +154,33 @@ class SkyFiClimate(ClimateDevice):
 
     def set_state(self):
         """Set the new state of the ac"""
-        try:
-            conn = http.client.HTTPConnection(self._host, 2000)
-            mode = self._operation_mode[self._current_operation]
-            if mode == 0:
-                pstate = 0
-            else:
-                pstate = 1
-            fan = self._fan_list.index(self.current_fan_mode)
-            payload = "/set.cgi?pass={}&p={}&t={:.5f}&f={}".format(self._password, pstate, self._target_temperature, fan)
-            conn.request("GET", payload)
-            resp = conn.getresponse()
-            data = resp.read().decode()
-            conn.close()
-            self.set_props(data)
-            #self.schedule_update_ha_state()
-        except:
-            _LOGGER.warning("SetState: {} failed".format(self._name))
+        mode = self._operation_mode[self._current_operation]
+        if mode == 0:
+            pstate = 0
+        else:
+            pstate = 1
+        fan = self._fan_list.index(self.current_fan_mode)
+        payload = "/set.cgi?pass={}&p={}&t={:.5f}&f={}".format(self._password, pstate, self._target_temperature, fan)
+        self.doQuery(payload)
+
+    def doQuery(self, payload):
+        """send query to SkyFi"""
+        retry_count = 5
+        while retry_count > 0:
+            retry_count = retry_count - 1
+            try:
+                conn = http.client.HTTPConnection(self._host, 2000)
+                conn.request("GET", payload)
+                resp = conn.getresponse()
+                data = resp.read().decode()
+                conn.close()
+                self.set_props(data)
+                retry_count = 0
+            except Exception as ex:
+                if retry_count == 0:
+                    _LOGGER.warning("Query: {} failed {}: {}".format(self._name, payload, ex))
+                conn.close()
+                time.sleep(2)
 
     @property
     def supported_features(self):
